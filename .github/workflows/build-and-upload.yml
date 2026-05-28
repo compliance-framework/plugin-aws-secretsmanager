@@ -7,7 +7,7 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d2dde640b448ba7d3fe182efd250e433bd836392
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
