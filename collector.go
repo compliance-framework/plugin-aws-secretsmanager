@@ -62,6 +62,7 @@ type STSAPI interface {
 type AWSClientSet struct {
 	SecretsManager SecretsManagerAPI
 	CloudTrail     CloudTrailAPI
+	IAMCloudTrail  CloudTrailAPI
 	STS            STSAPI
 }
 
@@ -136,9 +137,12 @@ func (DefaultAWSClientFactory) ResolveTargets(ctx context.Context, cfg *PluginCo
 }
 
 func (DefaultAWSClientFactory) ClientsForTarget(_ context.Context, target ResolvedTarget) (AWSClientSet, error) {
+	iamCloudTrailConfig := target.Config.Copy()
+	iamCloudTrailConfig.Region = "us-east-1"
 	return AWSClientSet{
 		SecretsManager: sm.NewFromConfig(target.Config),
 		CloudTrail:     cloudtrail.NewFromConfig(target.Config),
+		IAMCloudTrail:  cloudtrail.NewFromConfig(iamCloudTrailConfig),
 		STS:            sts.NewFromConfig(target.Config),
 	}, nil
 }
@@ -270,7 +274,11 @@ func (c *Collector) collectTarget(ctx context.Context, factory AWSClientFactory,
 		scopedErrors["target"] = append(scopedErrors["target"], smErr)
 		accumulated = errors.Join(accumulated, smErr)
 	}
-	iamEvents, iamCollected, iamErr := lookupEvents(ctx, clients.CloudTrail, "iam.amazonaws.com", iamCredentialRemovalEventNames, lookbackStart, collectedAt)
+	iamCloudTrail := clients.IAMCloudTrail
+	if iamCloudTrail == nil {
+		iamCloudTrail = clients.CloudTrail
+	}
+	iamEvents, iamCollected, iamErr := lookupEvents(ctx, iamCloudTrail, "iam.amazonaws.com", iamCredentialRemovalEventNames, lookbackStart, collectedAt)
 	if iamErr != nil {
 		scopedErrors["target"] = append(scopedErrors["target"], iamErr)
 		accumulated = errors.Join(accumulated, iamErr)
@@ -291,7 +299,7 @@ func listSecretARNs(ctx context.Context, client SecretsManagerAPI) ([]string, er
 	var arns []string
 	var token *string
 	for {
-		out, err := client.ListSecrets(ctx, &sm.ListSecretsInput{NextToken: token})
+		out, err := client.ListSecrets(ctx, &sm.ListSecretsInput{IncludePlannedDeletion: aws.Bool(true), NextToken: token})
 		if err != nil {
 			return arns, fmt.Errorf("list secrets: %w", err)
 		}

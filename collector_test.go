@@ -48,12 +48,14 @@ type fakeSM struct {
 	policyCalls     map[string]int
 	versionCalls    map[string]int
 	listSecretCalls int
+	listInputs      []*sm.ListSecretsInput
 }
 
-func (f *fakeSM) ListSecrets(context.Context, *sm.ListSecretsInput, ...func(*sm.Options)) (*sm.ListSecretsOutput, error) {
+func (f *fakeSM) ListSecrets(_ context.Context, in *sm.ListSecretsInput, _ ...func(*sm.Options)) (*sm.ListSecretsOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listSecretCalls++
+	f.listInputs = append(f.listInputs, in)
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -98,10 +100,12 @@ func (f *fakeSM) ListSecretVersionIds(_ context.Context, in *sm.ListSecretVersio
 
 type fakeCT struct {
 	events map[string][]cttypes.Event
+	calls  []string
 }
 
-func (f fakeCT) LookupEvents(_ context.Context, in *cloudtrail.LookupEventsInput, _ ...func(*cloudtrail.Options)) (*cloudtrail.LookupEventsOutput, error) {
+func (f *fakeCT) LookupEvents(_ context.Context, in *cloudtrail.LookupEventsInput, _ ...func(*cloudtrail.Options)) (*cloudtrail.LookupEventsOutput, error) {
 	source := aws.ToString(in.LookupAttributes[0].AttributeValue)
+	f.calls = append(f.calls, source)
 	return &cloudtrail.LookupEventsOutput{Events: f.events[source]}, nil
 }
 
@@ -139,7 +143,7 @@ func TestCollectorCollectsSecretShapeAndCloudTrail(t *testing.T) {
 		},
 		describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{},
 	}
-	ctFake := fakeCT{events: map[string][]cttypes.Event{
+	ctFake := &fakeCT{events: map[string][]cttypes.Event{
 		"secretsmanager.amazonaws.com": {{
 			EventName: aws.String("RotateSecret"), EventId: aws.String("evt-1"), EventTime: aws.Time(now),
 			CloudTrailEvent: aws.String(`{"eventSource":"secretsmanager.amazonaws.com","eventName":"RotateSecret","awsRegion":"us-east-1","userIdentity":{"arn":"arn:aws:iam::123456789012:role/rotation"},"requestParameters":{"secretId":"` + arn1 + `"}}`),
@@ -163,6 +167,11 @@ func TestCollectorCollectsSecretShapeAndCloudTrail(t *testing.T) {
 	}
 	if smFake.listSecretCalls != 2 || smFake.describeCalls[arn1] != 1 || smFake.policyCalls[arn1] != 1 || smFake.versionCalls[arn1] != 2 {
 		t.Fatalf("unexpected call counts: list=%d describe=%d policy=%d versions=%d", smFake.listSecretCalls, smFake.describeCalls[arn1], smFake.policyCalls[arn1], smFake.versionCalls[arn1])
+	}
+	for i, in := range smFake.listInputs {
+		if in.IncludePlannedDeletion == nil || !*in.IncludePlannedDeletion {
+			t.Fatalf("list page %d did not include planned deletion", i)
+		}
 	}
 	rec := result.Records[0]
 	if rec.Input.Config["kms_key_id"] != "aws/secretsmanager" {
@@ -190,7 +199,7 @@ func TestCollectorErrorScoping(t *testing.T) {
 	t.Run("target list failure once", func(t *testing.T) {
 		smFake := &fakeSM{listErr: errors.New("boom"), describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{}}
 		cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 1, APITimeoutSeconds: 30, PolicyInputs: map[string]interface{}{}}
-		result := (&Collector{Config: cfg, Factory: fakeFactory{targets: []ResolvedTarget{{AccountID: "123", Region: "us-east-1"}}, set: AWSClientSet{SecretsManager: smFake, CloudTrail: fakeCT{}, STS: fakeSTS{}}}}).Collect(context.Background())
+		result := (&Collector{Config: cfg, Factory: fakeFactory{targets: []ResolvedTarget{{AccountID: "123", Region: "us-east-1"}}, set: AWSClientSet{SecretsManager: smFake, CloudTrail: &fakeCT{}, STS: fakeSTS{}}}}).Collect(context.Background())
 		if len(result.Errors["target"]) != 1 {
 			t.Fatalf("target errors = %d", len(result.Errors["target"]))
 		}
@@ -208,7 +217,7 @@ func TestCollectorErrorScoping(t *testing.T) {
 			describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{},
 		}
 		cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 1, APITimeoutSeconds: 30, PolicyInputs: map[string]interface{}{}}
-		result := (&Collector{Config: cfg, Factory: fakeFactory{targets: []ResolvedTarget{{AccountID: "123", Region: "us-east-1"}}, set: AWSClientSet{SecretsManager: smFake, CloudTrail: fakeCT{}, STS: fakeSTS{}}}}).Collect(context.Background())
+		result := (&Collector{Config: cfg, Factory: fakeFactory{targets: []ResolvedTarget{{AccountID: "123", Region: "us-east-1"}}, set: AWSClientSet{SecretsManager: smFake, CloudTrail: &fakeCT{}, STS: fakeSTS{}}}}).Collect(context.Background())
 		if len(result.Errors["target"]) != 0 {
 			t.Fatalf("target errors should be empty: %#v", result.Errors["target"])
 		}
@@ -218,12 +227,112 @@ func TestCollectorErrorScoping(t *testing.T) {
 	})
 }
 
+func TestCollectorIncludesPlannedDeletionAndRecoveryWindow(t *testing.T) {
+	arn := "arn:aws:secretsmanager:us-east-1:123456789012:secret:PendingDelete-AbCdEf"
+	deletedAt := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	smFake := &fakeSM{
+		listPages: []*sm.ListSecretsOutput{
+			{SecretList: []smtypes.SecretListEntry{{ARN: aws.String(arn)}}, NextToken: aws.String("next")},
+			{SecretList: []smtypes.SecretListEntry{}},
+		},
+		describes: map[string]*sm.DescribeSecretOutput{
+			arn: {ARN: aws.String(arn), Name: aws.String("PendingDelete-AbCdEf"), DeletedDate: aws.Time(deletedAt)},
+		},
+		policies:      map[string]*sm.GetResourcePolicyOutput{arn: {ResourcePolicy: aws.String("")}},
+		policyErrs:    map[string]error{},
+		versionPages:  map[string][]*sm.ListSecretVersionIdsOutput{arn: {{}}},
+		describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{},
+	}
+	regionalCT := &fakeCT{events: map[string][]cttypes.Event{
+		"secretsmanager.amazonaws.com": {{
+			EventName: aws.String("DeleteSecret"), EventId: aws.String("delete-1"), EventTime: aws.Time(deletedAt),
+			CloudTrailEvent: aws.String(`{"eventSource":"secretsmanager.amazonaws.com","eventName":"DeleteSecret","awsRegion":"us-east-1","userIdentity":{"arn":"arn:aws:iam::123456789012:role/admin"},"requestParameters":{"secretId":"` + arn + `","recoveryWindowInDays":14}}`),
+		}},
+	}}
+	globalCT := &fakeCT{events: map[string][]cttypes.Event{}}
+	cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 1, APITimeoutSeconds: 30, PolicyInputs: map[string]interface{}{}}
+	result := (&Collector{Config: cfg, Factory: fakeFactory{
+		targets: []ResolvedTarget{{AccountID: "123456789012", Region: "us-east-1"}},
+		set:     AWSClientSet{SecretsManager: smFake, CloudTrail: regionalCT, IAMCloudTrail: globalCT, STS: fakeSTS{}},
+	}}).Collect(context.Background())
+	if result.Err != nil {
+		t.Fatalf("collect: %v", result.Err)
+	}
+	if len(result.Records) != 1 {
+		t.Fatalf("records = %d", len(result.Records))
+	}
+	for i, in := range smFake.listInputs {
+		if in.IncludePlannedDeletion == nil || !*in.IncludePlannedDeletion {
+			t.Fatalf("list page %d did not include planned deletion", i)
+		}
+	}
+	rec := result.Records[0]
+	if rec.Input.Config["deleted_date"] == "" {
+		t.Fatalf("deleted_date not exposed")
+	}
+	if got := rec.Input.Config["recovery_window_days"]; got != 14 {
+		t.Fatalf("recovery_window_days = %v", got)
+	}
+}
+
+func TestCollectorUsesGlobalCloudTrailForIAMEvents(t *testing.T) {
+	arn := "arn:aws:secretsmanager:us-west-2:123456789012:secret:App/db-AbCdEf"
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	smFake := &fakeSM{
+		listPages: []*sm.ListSecretsOutput{{SecretList: []smtypes.SecretListEntry{{ARN: aws.String(arn)}}}},
+		describes: map[string]*sm.DescribeSecretOutput{
+			arn: {ARN: aws.String(arn), Name: aws.String("App/db-AbCdEf")},
+		},
+		policies: map[string]*sm.GetResourcePolicyOutput{
+			arn: {ResourcePolicy: aws.String(`{"Version":"2012-10-17","Statement":{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:user/app-reader"},"Action":["secretsmanager:GetSecretValue"]}}`)},
+		},
+		policyErrs:    map[string]error{},
+		versionPages:  map[string][]*sm.ListSecretVersionIdsOutput{arn: {{}}},
+		describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{},
+	}
+	regionalCT := &fakeCT{events: map[string][]cttypes.Event{
+		"secretsmanager.amazonaws.com": {{
+			EventName: aws.String("RotateSecret"), EventId: aws.String("rotate-1"), EventTime: aws.Time(now),
+			CloudTrailEvent: aws.String(`{"eventSource":"secretsmanager.amazonaws.com","eventName":"RotateSecret","awsRegion":"us-west-2","userIdentity":{"arn":"arn:aws:iam::123456789012:role/rotation"},"requestParameters":{"secretId":"` + arn + `"}}`),
+		}},
+	}}
+	globalCT := &fakeCT{events: map[string][]cttypes.Event{
+		"iam.amazonaws.com": {{
+			EventName: aws.String("DeleteAccessKey"), EventId: aws.String("iam-1"), EventTime: aws.Time(now),
+			CloudTrailEvent: aws.String(`{"eventSource":"iam.amazonaws.com","eventName":"DeleteAccessKey","awsRegion":"us-east-1","userIdentity":{"arn":"arn:aws:iam::123456789012:role/admin"},"requestParameters":{"userName":"app-reader"}}`),
+		}},
+	}}
+	cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 1, APITimeoutSeconds: 30, PolicyInputs: map[string]interface{}{}}
+	result := (&Collector{Config: cfg, Factory: fakeFactory{
+		targets: []ResolvedTarget{{AccountID: "123456789012", Region: "us-west-2"}},
+		set:     AWSClientSet{SecretsManager: smFake, CloudTrail: regionalCT, IAMCloudTrail: globalCT, STS: fakeSTS{}},
+	}}).Collect(context.Background())
+	if result.Err != nil {
+		t.Fatalf("collect: %v", result.Err)
+	}
+	if len(regionalCT.calls) != 1 || regionalCT.calls[0] != "secretsmanager.amazonaws.com" {
+		t.Fatalf("regional CloudTrail calls = %#v", regionalCT.calls)
+	}
+	if len(globalCT.calls) != 1 || globalCT.calls[0] != "iam.amazonaws.com" {
+		t.Fatalf("global CloudTrail calls = %#v", globalCT.calls)
+	}
+	if len(result.Records) != 1 {
+		t.Fatalf("records = %d", len(result.Records))
+	}
+	if len(result.Records[0].Input.Dynamic["cloudtrail_events"].([]normalizedEvent)) != 1 {
+		t.Fatalf("regional Secrets Manager event not attached")
+	}
+	if len(result.Records[0].Input.Dynamic["iam_credential_removal_events"].([]normalizedEvent)) != 1 {
+		t.Fatalf("global IAM event not attached")
+	}
+}
+
 func TestCollectorMaxConcurrencyZeroDoesNotHang(t *testing.T) {
 	cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 0, APITimeoutSeconds: 1, PolicyInputs: map[string]interface{}{}}
 	smFake := &fakeSM{listPages: []*sm.ListSecretsOutput{{}}, describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{}}
 	done := make(chan struct{})
 	go func() {
-		(&Collector{Config: cfg, Factory: fakeFactory{targets: []ResolvedTarget{{AccountID: "123", Region: "us-east-1"}}, set: AWSClientSet{SecretsManager: smFake, CloudTrail: fakeCT{}, STS: fakeSTS{}}}}).Collect(context.Background())
+		(&Collector{Config: cfg, Factory: fakeFactory{targets: []ResolvedTarget{{AccountID: "123", Region: "us-east-1"}}, set: AWSClientSet{SecretsManager: smFake, CloudTrail: &fakeCT{}, STS: fakeSTS{}}}}).Collect(context.Background())
 		close(done)
 	}()
 	select {
