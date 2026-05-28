@@ -102,7 +102,7 @@ When AWS omits `KmsKeyId` for the AWS-managed default key, `config.kms_key_id` i
 
 CONFIG evidence supports rotation, vendor credential, confidentiality, and privacy policy bundles through `DescribeSecret`, `GetResourcePolicy`, `ListSecretVersionIds`, and tags from `DescribeSecret`. Fields include rotation state, rotation rules, KMS key ID string, owning service, replication status, version stages, resource policy principals, and hashed name/description.
 
-DYNAMIC evidence uses a 90-day default CloudTrail lookback. Secrets Manager events are filtered to `RotateSecret`, `PutSecretValue`, `UpdateSecret`, `UpdateSecretVersionStage`, `DeleteSecret`, `RestoreSecret`, `PutResourcePolicy`, `DeleteResourcePolicy`, `TagResource`, `UntagResource`, `CreateSecret`, and `GetSecretValue`. IAM credential-removal events are filtered to `DeleteUser`, `DeleteAccessKey`, `DetachUserPolicy`, and `RemoveUserFromGroup`.
+DYNAMIC evidence uses a 90-day default CloudTrail lookback. Secrets Manager events are filtered to `RotateSecret`, `PutSecretValue`, `UpdateSecret`, `UpdateSecretVersionStage`, `DeleteSecret`, `RestoreSecret`, `PutResourcePolicy`, `DeleteResourcePolicy`, `TagResource`, `UntagResource`, `CreateSecret`, and `GetSecretValue`. IAM credential-removal events are filtered to `DeleteUser`, `DeleteAccessKey`, `DetachUserPolicy`, `RemoveUserFromGroup`, `DeleteRole`, `DetachRolePolicy`, and `RemoveRoleFromInstanceProfile`.
 
 ## CloudTrail Attribution
 

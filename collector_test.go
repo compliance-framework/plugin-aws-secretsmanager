@@ -379,6 +379,58 @@ func TestCollectorAttachesFriendlyNameEventsToDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestPrincipalsMatchAffectedIsOneWay(t *testing.T) {
+	if !principalsMatchAffected([]string{"arn:aws:iam::123456789012:user/app-reader"}, []string{"app-reader"}) {
+		t.Fatalf("expected username to match containing principal ARN")
+	}
+	if principalsMatchAffected([]string{"ad"}, []string{"arn:aws:iam::123456789012:user/admin"}) {
+		t.Fatalf("reverse substring match should not attach unrelated principal")
+	}
+}
+
+func TestAttachIAMCredentialEventsMatchesRoleNameOnlyWhenPrincipalContainsIt(t *testing.T) {
+	matchedARN := "arn:aws:secretsmanager:us-east-1:123456789012:secret:Matched-AbCdEf"
+	unmatchedARN := "arn:aws:secretsmanager:us-east-1:123456789012:secret:Unmatched-GhIjKl"
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	drafts := map[string]*secretDraft{
+		matchedARN: {
+			dynamic:   map[string]interface{}{"iam_credential_removal_events": []normalizedEvent{}},
+			principal: []string{"arn:aws:iam::123456789012:role/app-rotator"},
+		},
+		unmatchedARN: {
+			dynamic:   map[string]interface{}{"iam_credential_removal_events": []normalizedEvent{}},
+			principal: []string{"arn:aws:iam::123456789012:role/other-service"},
+		},
+	}
+	ctFake := &fakeCT{events: map[string][]cttypes.Event{
+		"iam.amazonaws.com": {
+			{
+				EventName: aws.String("DeleteRole"), EventId: aws.String("role-1"), EventTime: aws.Time(now),
+				CloudTrailEvent: aws.String(`{"eventSource":"iam.amazonaws.com","eventName":"DeleteRole","awsRegion":"us-east-1","requestParameters":{"roleName":"app-rotator"}}`),
+			},
+			{
+				EventName: aws.String("DetachRolePolicy"), EventId: aws.String("role-2"), EventTime: aws.Time(now),
+				CloudTrailEvent: aws.String(`{"eventSource":"iam.amazonaws.com","eventName":"DetachRolePolicy","awsRegion":"us-east-1","requestParameters":{"roleName":"unreferenced-role"}}`),
+			},
+		},
+	}}
+	events, _, err := lookupEvents(context.Background(), ctFake, "iam.amazonaws.com", iamCredentialRemovalEventNames, now.Add(-time.Hour), now)
+	if err != nil {
+		t.Fatalf("lookup events: %v", err)
+	}
+
+	attachIAMCredentialEvents(drafts, events)
+
+	matchedEvents := drafts[matchedARN].dynamic["iam_credential_removal_events"].([]normalizedEvent)
+	if len(matchedEvents) != 1 || matchedEvents[0].EventID != "role-1" {
+		t.Fatalf("matched role events = %#v", matchedEvents)
+	}
+	unmatchedEvents := drafts[unmatchedARN].dynamic["iam_credential_removal_events"].([]normalizedEvent)
+	if len(unmatchedEvents) != 0 {
+		t.Fatalf("unmatched role events = %#v", unmatchedEvents)
+	}
+}
+
 func TestCollectorMaxConcurrencyZeroDoesNotHang(t *testing.T) {
 	cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 0, APITimeoutSeconds: 1, PolicyInputs: map[string]interface{}{}}
 	smFake := &fakeSM{listPages: []*sm.ListSecretsOutput{{}}, describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{}}

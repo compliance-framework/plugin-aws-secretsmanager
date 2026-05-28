@@ -38,10 +38,13 @@ var secretsManagerEventNames = map[string]bool{
 }
 
 var iamCredentialRemovalEventNames = map[string]bool{
-	"DeleteUser":          true,
-	"DeleteAccessKey":     true,
-	"DetachUserPolicy":    true,
-	"RemoveUserFromGroup": true,
+	"DeleteUser":                    true,
+	"DeleteAccessKey":               true,
+	"DetachUserPolicy":              true,
+	"RemoveUserFromGroup":           true,
+	"DeleteRole":                    true,
+	"DetachRolePolicy":              true,
+	"RemoveRoleFromInstanceProfile": true,
 }
 
 type SecretsManagerAPI interface {
@@ -742,7 +745,7 @@ func affectedIAMIdentifiers(params map[string]interface{}) []string {
 func principalsMatchAffected(principals, affected []string) bool {
 	for _, principal := range principals {
 		for _, ident := range affected {
-			if principal != "" && ident != "" && (strings.Contains(principal, ident) || strings.Contains(ident, principal)) {
+			if principal != "" && ident != "" && strings.Contains(principal, ident) {
 				return true
 			}
 		}
