@@ -1,0 +1,202 @@
+lisa-addressed:
+---
+Comment (collector.go:104):
+_⚠️ Potential issue_ | _🟠 Major_ | _⚡ Quick win_
+
+**Fail fast when no AWS region can be resolved.**
+
+Line 103 currently creates a target with an empty region, which defers failure to later AWS API calls with unclear errors. Return a configuration error here instead.
+
+<details>
+<summary>Suggested fix</summary>
+
+```diff
+-		if len(regions) == 0 {
+-			regions = []string{""}
+-		}
++		if len(regions) == 0 {
++			return nil, fmt.Errorf("no AWS region resolved for account %q; set account regions, default_regions, or AWS_REGION", account.AccountID)
++		}
+```
+</details>
+
+<!-- suggestion_start -->
+
+<details>
+<summary>📝 Committable suggestion</summary>
+
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+
+```suggestion
+		if len(regions) == 0 {
+			return nil, fmt.Errorf("no AWS region resolved for account %q; set account regions, default_regions, or AWS_REGION", account.AccountID)
+		}
+```
+
+</details>
+
+<!-- suggestion_end -->
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against current code. Fix only still-valid issues, skip the
+rest with a brief reason, keep changes minimal, and validate.
+
+In `@collector.go` around lines 102 - 104, The code in collector.go currently
+masks a missing AWS region by setting regions = []string{""}; instead, detect
+when len(regions)==0 and return a clear configuration error (e.g., fmt.Errorf or
+a package ErrInvalidConfig) from the function that constructs targets (the
+function that owns the 'regions' variable) so failure is fast and descriptive;
+replace the empty-string fallback with a returned error and update any callers
+to propagate/handle that error accordingly.
+```
+
+</details>
+
+<!-- fingerprinting:phantom:poseidon:hawk -->
+
+<!-- This is an auto-generated comment by CodeRabbit -->
+---
+Comment (main_test.go:43):
+_⚠️ Potential issue_ | _🟡 Minor_ | _⚡ Quick win_
+
+**Guard against nil `resp` before dereferencing in the nil-request test.**
+
+At Line 41, `resp.GetStatus()` can panic if `Eval` returns `nil, err`. Add an explicit nil check so failures stay diagnostic.
+
+<details>
+<summary>Suggested fix</summary>
+
+```diff
+ resp, err := p.Eval(nil, nil)
+ if err == nil {
+ 	t.Fatalf("expected error")
+ }
++if resp == nil {
++	t.Fatalf("expected non-nil response on failure")
++}
+ if resp.GetStatus() != proto.ExecutionStatus_FAILURE {
+ 	t.Fatalf("status = %v", resp.GetStatus())
+ }
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against current code. Fix only still-valid issues, skip the
+rest with a brief reason, keep changes minimal, and validate.
+
+In `@main_test.go` around lines 37 - 43, The test currently calls p.Eval(nil, nil)
+and dereferences resp without guarding for a nil response; update the
+nil-request test around p.Eval to explicitly check if resp == nil after the call
+and t.Fatalf with a clear message (e.g., "expected non-nil resp when error
+returned" or include the err) before calling resp.GetStatus(), and only then
+assert resp.GetStatus() == proto.ExecutionStatus_FAILURE so the test cannot
+panic when Eval returns (nil, err).
+```
+
+</details>
+
+<!-- fingerprinting:phantom:poseidon:hawk -->
+
+<!-- This is an auto-generated comment by CodeRabbit -->
+---
+Comment (main.go:102):
+_⚠️ Potential issue_ | _🟠 Major_ | _⚡ Quick win_
+
+**Guard against nil logger before calling `Named`.**
+
+If `CompliancePlugin` is instantiated without `logger`, Line 102 will panic. Initialize a safe default logger when `l.logger == nil` before building the collector.
+
+<details>
+<summary>Suggested fix</summary>
+
+```diff
+-	collector := &Collector{Logger: l.logger.Named("collector"), Config: parsedConfig, Factory: l.factory}
++	logger := l.logger
++	if logger == nil {
++		logger = hclog.NewNullLogger()
++	}
++	collector := &Collector{Logger: logger.Named("collector"), Config: parsedConfig, Factory: l.factory}
+```
+</details>
+
+<!-- suggestion_start -->
+
+<details>
+<summary>📝 Committable suggestion</summary>
+
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+
+```suggestion
+	logger := l.logger
+	if logger == nil {
+		logger = hclog.NewNullLogger()
+	}
+	collector := &Collector{Logger: logger.Named("collector"), Config: parsedConfig, Factory: l.factory}
+```
+
+</details>
+
+<!-- suggestion_end -->
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against current code. Fix only still-valid issues, skip the
+rest with a brief reason, keep changes minimal, and validate.
+
+In `@main.go` at line 102, When building the Collector you must guard against a
+nil logger on the CompliancePlugin receiver (l) before calling l.logger.Named;
+if l.logger is nil assign a safe default no-op logger to l.logger (e.g., a
+zap.NewNop() or equivalent no-op logger used in this project) and then call
+l.logger.Named to construct the Collector: update the code around the Collector
+creation (referencing Collector, CompliancePlugin receiver l, and
+l.logger.Named) to ensure l.logger is non-nil first.
+```
+
+</details>
+
+<!-- fingerprinting:phantom:poseidon:hawk -->
+
+<!-- This is an auto-generated comment by CodeRabbit -->
+---
+Comment (main.go:227):
+_⚠️ Potential issue_ | _🟠 Major_ | _⚡ Quick win_
+
+**Avoid debug logging as the default runtime level.**
+
+Line 227 enables debug logs unconditionally, which weakens security posture and increases risk of sensitive metadata appearing in logs. Use `Info` by default and make `Debug` opt-in via environment/config.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against current code. Fix only still-valid issues, skip the
+rest with a brief reason, keep changes minimal, and validate.
+
+In `@main.go` at line 227, The logger is currently created with debug enabled
+unconditionally (logger := hclog.New(&hclog.LoggerOptions{Level: hclog.Debug,
+JSONFormat: true})); change this to use Info as the default level and make Debug
+opt‑in via configuration or an environment variable (e.g., read LOG_LEVEL or
+DEBUG at startup), map that value to an hclog level (using hclog parsing or a
+small switch) and pass the resolved level into hclog.New so the runtime defaults
+to Info but can be elevated to Debug when explicitly set.
+```
+
+</details>
+
+<!-- fingerprinting:phantom:poseidon:hawk -->
+
+<!-- This is an auto-generated comment by CodeRabbit -->
+Implementation guidance: In collector.go, update DefaultAWSClientFactory.ResolveTargets. After checking account.Regions, cfg.DefaultRegions, and base.Region, replace the current `regions = []string{""}` fallback with `return nil, fmt.Errorf("no AWS region resolved for account %q; set account regions, default_regions, or AWS_REGION", account.AccountID)`. Do not create a target with an empty Region, because that only fails later in AWS SDK calls. Keep the existing precedence order for account regions, default regions, then AWS config region. Add or adjust a config/collector test for an account with no regions, no default_regions, and no base AWS region, asserting ResolveTargets returns a clear error instead of a target whose Region is empty.
+Implementation guidance: In main_test.go, update TestEvalNilRequest. Immediately after `if err == nil { t.Fatalf(...) }`, add `if resp == nil { t.Fatalf("expected non-nil response when Eval returns an error") }` before calling `resp.GetStatus()`. Keep the existing assertion that the status is proto.ExecutionStatus_FAILURE. This is only a test hardening change; do not change CompliancePlugin.Eval behavior for this thread.
+Implementation guidance: In main.go, inside CompliancePlugin.Eval where the Collector is created, guard the receiver logger before calling Named. Use a local variable: `logger := l.logger; if logger == nil { logger = hclog.NewNullLogger() }`, then construct `collector := &Collector{Logger: logger.Named("collector"), Config: parsedConfig, Factory: l.factory}`. Do not assign to l.logger unless you also hold the mutex, because Eval can run concurrently; a local fallback avoids a data race. Add a small test that instantiates `&CompliancePlugin{}` or a plugin with nil logger and verifies Eval returns a normal failure/success response instead of panicking.
+Implementation guidance: In main.go, change main's logger setup so the default level is hclog.Info, not hclog.Debug. Add a small helper such as `defaultLogLevel()` in main.go that reads an environment variable like `LOG_LEVEL`, accepts case-insensitive values `debug`, `info`, `warn`, `error`, and returns hclog.Info for empty or unknown values. Then use `hclog.New(&hclog.LoggerOptions{Level: defaultLogLevel(), JSONFormat: true})`. Do not log secrets or config values while adding this. Add focused tests for the helper if practical, using t.Setenv to verify empty defaults to Info and `LOG_LEVEL=debug` enables Debug.
