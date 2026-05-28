@@ -327,6 +327,58 @@ func TestCollectorUsesGlobalCloudTrailForIAMEvents(t *testing.T) {
 	}
 }
 
+func TestCollectorAttachesFriendlyNameEventsToDuplicateNames(t *testing.T) {
+	arn1 := "arn:aws:secretsmanager:us-east-1:123456789012:secret:Shared/name-AbCdEf"
+	arn2 := "arn:aws:secretsmanager:us-east-1:123456789012:secret:Shared/name-ZyXwVu"
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	smFake := &fakeSM{
+		listPages: []*sm.ListSecretsOutput{{SecretList: []smtypes.SecretListEntry{
+			{ARN: aws.String(arn1)},
+			{ARN: aws.String(arn2)},
+		}}},
+		describes: map[string]*sm.DescribeSecretOutput{
+			arn1: {ARN: aws.String(arn1), Name: aws.String("Shared/name-AbCdEf")},
+			arn2: {ARN: aws.String(arn2), Name: aws.String("Shared/name-ZyXwVu")},
+		},
+		policies: map[string]*sm.GetResourcePolicyOutput{
+			arn1: {ResourcePolicy: aws.String("")},
+			arn2: {ResourcePolicy: aws.String("")},
+		},
+		policyErrs: map[string]error{},
+		versionPages: map[string][]*sm.ListSecretVersionIdsOutput{
+			arn1: {{}},
+			arn2: {{}},
+		},
+		describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{},
+	}
+	regionalCT := &fakeCT{events: map[string][]cttypes.Event{
+		"secretsmanager.amazonaws.com": {{
+			EventName: aws.String("UpdateSecret"), EventId: aws.String("shared-1"), EventTime: aws.Time(now),
+			CloudTrailEvent: aws.String(`{"eventSource":"secretsmanager.amazonaws.com","eventName":"UpdateSecret","awsRegion":"us-east-1","userIdentity":{"arn":"arn:aws:iam::123456789012:role/admin"},"requestParameters":{"secretId":"Shared/name"}}`),
+		}},
+	}}
+	cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 1, APITimeoutSeconds: 30, PolicyInputs: map[string]interface{}{}}
+	result := (&Collector{Config: cfg, Factory: fakeFactory{
+		targets: []ResolvedTarget{{AccountID: "123456789012", Region: "us-east-1"}},
+		set:     AWSClientSet{SecretsManager: smFake, CloudTrail: regionalCT, IAMCloudTrail: &fakeCT{}, STS: fakeSTS{}},
+	}}).Collect(context.Background())
+	if result.Err != nil {
+		t.Fatalf("collect: %v", result.Err)
+	}
+	if len(result.Records) != 2 {
+		t.Fatalf("records = %d", len(result.Records))
+	}
+	for _, rec := range result.Records {
+		events := rec.Input.Dynamic["cloudtrail_events"].([]normalizedEvent)
+		if len(events) != 1 {
+			t.Fatalf("%s cloudtrail events = %d", rec.Labels["resource_arn"], len(events))
+		}
+		if events[0].EventID != "shared-1" {
+			t.Fatalf("%s event id = %s", rec.Labels["resource_arn"], events[0].EventID)
+		}
+	}
+}
+
 func TestCollectorMaxConcurrencyZeroDoesNotHang(t *testing.T) {
 	cfg := &PluginConfig{LookbackDays: 90, MaxConcurrency: 0, APITimeoutSeconds: 1, PolicyInputs: map[string]interface{}{}}
 	smFake := &fakeSM{listPages: []*sm.ListSecretsOutput{{}}, describeCalls: map[string]int{}, policyCalls: map[string]int{}, versionCalls: map[string]int{}}

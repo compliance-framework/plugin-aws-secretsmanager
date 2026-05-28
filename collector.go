@@ -625,16 +625,26 @@ func eventResourceNames(resources []cttypes.Resource) []string {
 }
 
 func attachSecretsManagerEvents(drafts map[string]*secretDraft, events []collectedEvent) {
-	identifiers := map[string]string{}
+	highConfidence := map[string]map[string]bool{}
+	friendlyNames := map[string]map[string]bool{}
+	addIdentifier := func(index map[string]map[string]bool, ident, arn string) {
+		if ident == "" {
+			return
+		}
+		if index[ident] == nil {
+			index[ident] = map[string]bool{}
+		}
+		index[ident][arn] = true
+	}
 	for arn, d := range drafts {
-		identifiers[arn] = arn
+		addIdentifier(highConfidence, arn, arn)
 		id := secretIDFromARN(arn)
-		identifiers[id] = arn
+		addIdentifier(highConfidence, id, arn)
 		if without := secretNameWithoutSuffix(id); without != "" {
-			identifiers[without] = arn
+			addIdentifier(friendlyNames, without, arn)
 		}
 		if d.name != "" {
-			identifiers[d.name] = arn
+			addIdentifier(friendlyNames, d.name, arn)
 		}
 	}
 	seen := map[string]bool{}
@@ -642,10 +652,26 @@ func attachSecretsManagerEvents(drafts map[string]*secretDraft, events []collect
 		// Substring matching against event.Raw is deliberate: many Secrets Manager
 		// CloudTrail events carry the secret identifier inside requestParameters more
 		// reliably than the structured Resources list.
-		for ident, arn := range identifiers {
-			if ident == "" || !strings.Contains(event.raw, ident) {
+		matched := map[string]bool{}
+		for ident, arns := range highConfidence {
+			if !strings.Contains(event.raw, ident) {
 				continue
 			}
+			for arn := range arns {
+				matched[arn] = true
+			}
+		}
+		if len(matched) == 0 {
+			for ident, arns := range friendlyNames {
+				if !strings.Contains(event.raw, ident) {
+					continue
+				}
+				for arn := range arns {
+					matched[arn] = true
+				}
+			}
+		}
+		for arn := range matched {
 			key := event.normalized.EventID + "\x00" + arn
 			if seen[key] {
 				continue
