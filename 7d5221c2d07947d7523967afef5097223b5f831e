@@ -1,0 +1,6 @@
+lisa-addressed:
+---
+[medium] .goreleaser.yaml:4 (security)
+The release build path runs Goreleaser with only `go mod download` in the before hooks, and this diff removed the `go mod verify` hook. The tag workflow does not run the test workflow first, so release artifacts can be built from an unverified/restored module cache, which violates the intended CI module-validation flow and weakens supply-chain protection.
+Suggested fix: Add `go mod verify` immediately after `go mod download` in `.goreleaser.yaml` before hooks, or add an explicit `go mod download` plus `go mod verify` step in `.github/workflows/build-and-upload.yml` before the Goreleaser action.
+Guidance: Update .goreleaser.yaml in the top-level before.hooks list: keep the existing `go mod download` hook, add `go mod verify` immediately after it, and leave `go generate ./...` after verification. Do not replace the pinned Goreleaser GitHub Action or add `go mod tidy`; the repo's stated CI design is download plus verify. This fixes the tag/release path because .github/workflows/build-and-upload.yml runs Goreleaser directly and does not necessarily run the test workflow first.
