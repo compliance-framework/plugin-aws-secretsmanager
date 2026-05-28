@@ -9,3 +9,6 @@ lisa-design:
 - `clonePolicyInputs` is intentionally a shallow top-level copy; callers must deep-copy nested values before mutation.
 - `recovery_window_days` is initialized to `0` and enriched from matched CloudTrail `DeleteSecret.requestParameters.recoveryWindowInDays` when available, because `DescribeSecret` does not expose the original deletion window directly.
 - CI workflows pin all third-party actions to commit SHAs, disable checkout credential persistence, and validate modules with `go mod download` plus `go mod verify` instead of running `go mod tidy`.
+
+lisa-selfreview: pass 1 (verdict=request_changes)
+- [medium] .goreleaser.yaml:4 (security): The release build path runs Goreleaser with only `go mod download` in the before hooks, and this diff removed the `go mod verify` hook. The tag workflow does not run the test workflow first, so release artifacts can be built from an unverified/restored module cache, which violates the intended CI module-validation flow and weakens supply-chain protection.
