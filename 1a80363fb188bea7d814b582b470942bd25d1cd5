@@ -1,0 +1,11 @@
+lisa-design:
+- The plugin emits exactly one record per Secrets Manager secret ARN and folds resource policy, versions, tags, and matched CloudTrail events into that record; policy bundles route by the single `secret` resource type.
+- `resource_id` intentionally keeps the full friendly name plus AWS 6-character suffix from the ARN, because stripping it can collapse distinct recreated secrets.
+- Empty `KmsKeyId` from `DescribeSecret` is normalized to the sentinel `aws/secretsmanager` so policies can explicitly detect AWS-managed default key usage.
+- Secrets Manager CloudTrail attribution deliberately scans raw event JSON for ARN/name identifiers because many event types carry the secret identifier in `requestParameters` rather than `Resources`.
+- IAM credential-removal events are attached only when the affected IAM user/role identifier substring-matches a secret resource-policy principal; unmatched account-wide IAM events are dropped instead of emitted as standalone evidence.
+- Target-scoped failures, such as `ListSecrets` or CloudTrail lookup errors, stay under target scope and are not duplicated onto each secret; per-secret API failures attach only to that secret ARN.
+- `APITimeoutSeconds` is a per-target collection budget covering all paginated SDK calls for one account/region, not a per-call timeout.
+- `clonePolicyInputs` is intentionally a shallow top-level copy; callers must deep-copy nested values before mutation.
+- `recovery_window_days` is initialized to `0` and enriched from matched CloudTrail `DeleteSecret.requestParameters.recoveryWindowInDays` when available, because `DescribeSecret` does not expose the original deletion window directly.
+- CI workflows pin all third-party actions to commit SHAs, disable checkout credential persistence, and validate modules with `go mod download` plus `go mod verify` instead of running `go mod tidy`.
