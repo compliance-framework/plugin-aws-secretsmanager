@@ -38,8 +38,42 @@ func TestEvalNilRequest(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
+	if resp == nil {
+		t.Fatalf("expected non-nil response when Eval returns an error")
+	}
 	if resp.GetStatus() != proto.ExecutionStatus_FAILURE {
 		t.Fatalf("status = %v", resp.GetStatus())
+	}
+}
+
+func TestEvalNilLoggerDoesNotPanic(t *testing.T) {
+	p := &CompliancePlugin{
+		factory: fakeFactory{
+			targets: []ResolvedTarget{{AccountID: "123456789012", Region: "us-east-1"}},
+			set:     AWSClientSet{SecretsManager: emptySM{}, CloudTrail: emptyCT{}, STS: fakeSTS{}},
+		},
+	}
+	resp, err := p.Eval(&proto.EvalRequest{}, nil)
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if resp == nil || resp.GetStatus() != proto.ExecutionStatus_SUCCESS {
+		t.Fatalf("resp = %v", resp)
+	}
+}
+
+func TestDefaultLogLevel(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "")
+	if got := defaultLogLevel(); got != hclog.Info {
+		t.Fatalf("empty LOG_LEVEL = %v", got)
+	}
+	t.Setenv("LOG_LEVEL", "debug")
+	if got := defaultLogLevel(); got != hclog.Debug {
+		t.Fatalf("debug LOG_LEVEL = %v", got)
+	}
+	t.Setenv("LOG_LEVEL", "bogus")
+	if got := defaultLogLevel(); got != hclog.Info {
+		t.Fatalf("unknown LOG_LEVEL = %v", got)
 	}
 }
 

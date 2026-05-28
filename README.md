@@ -29,6 +29,8 @@ The CCF agent passes flat string config. Structured values are JSON strings.
 | `max_concurrency` | `4` | Positive worker count for account/region targets; `0` is normalized to `1`. |
 | `api_timeout_seconds` | `120` | Positive per-target budget covering all paginated Secrets Manager, CloudTrail, and STS calls for one account/region. |
 
+Runtime logs default to `info`. Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error` to override the level.
+
 ## Rego Input
 
 Each secret is marshaled with `resource.type = "secret"`:

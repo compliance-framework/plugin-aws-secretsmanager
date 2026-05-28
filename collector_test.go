@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,33 @@ func (f fakeFactory) ResolveTargets(context.Context, *PluginConfig) ([]ResolvedT
 
 func (f fakeFactory) ClientsForTarget(context.Context, ResolvedTarget) (AWSClientSet, error) {
 	return f.set, nil
+}
+
+func TestDefaultAWSClientFactoryResolveTargetsRequiresRegion(t *testing.T) {
+	dir := t.TempDir()
+	configFile := dir + "/config"
+	credentialsFile := dir + "/credentials"
+	if err := os.WriteFile(configFile, []byte(""), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(credentialsFile, []byte(""), 0600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_CONFIG_FILE", configFile)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credentialsFile)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+	_, err := (DefaultAWSClientFactory{}).ResolveTargets(context.Background(), &PluginConfig{
+		Accounts: []AccountConfig{{AccountID: "123456789012"}},
+	})
+	if err == nil {
+		t.Fatalf("expected missing region error")
+	}
+	if !strings.Contains(err.Error(), "no AWS region resolved for account \"123456789012\"") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 type fakeSTS struct{}

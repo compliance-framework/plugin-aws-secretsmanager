@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 
 	policyManager "github.com/compliance-framework/agent/policy-manager"
@@ -99,7 +101,11 @@ func (l *CompliancePlugin) Eval(req *proto.EvalRequest, apiHelper runner.ApiHelp
 		resourceTypeSecret: policyRequest.PolicyPathsForBehavior(resourceTypeSecret),
 	}
 
-	collector := &Collector{Logger: l.logger.Named("collector"), Config: parsedConfig, Factory: l.factory}
+	logger := l.logger
+	if logger == nil {
+		logger = hclog.NewNullLogger()
+	}
+	collector := &Collector{Logger: logger.Named("collector"), Config: parsedConfig, Factory: l.factory}
 	result := collector.Collect(ctx)
 
 	evidences := make([]*proto.Evidence, 0)
@@ -223,8 +229,23 @@ func defaultActors() []*proto.OriginActor {
 	}}
 }
 
+func defaultLogLevel() hclog.Level {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
+	case "debug":
+		return hclog.Debug
+	case "warn":
+		return hclog.Warn
+	case "error":
+		return hclog.Error
+	case "info":
+		return hclog.Info
+	default:
+		return hclog.Info
+	}
+}
+
 func main() {
-	logger := hclog.New(&hclog.LoggerOptions{Level: hclog.Debug, JSONFormat: true})
+	logger := hclog.New(&hclog.LoggerOptions{Level: defaultLogLevel(), JSONFormat: true})
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: runner.HandshakeConfig,
 		Plugins:         map[string]goplugin.Plugin{"runner": &runner.RunnerV2GRPCPlugin{Impl: &CompliancePlugin{logger: logger}}},

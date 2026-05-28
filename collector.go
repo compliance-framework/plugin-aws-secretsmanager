@@ -103,7 +103,7 @@ func (DefaultAWSClientFactory) ResolveTargets(ctx context.Context, cfg *PluginCo
 			regions = []string{base.Region}
 		}
 		if len(regions) == 0 {
-			regions = []string{""}
+			return nil, fmt.Errorf("no AWS region resolved for account %q; set account regions, default_regions, or AWS_REGION", account.AccountID)
 		}
 		for _, region := range regions {
 			awsCfg := base.Copy()
