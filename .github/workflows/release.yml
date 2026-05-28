@@ -10,5 +10,9 @@ permissions:
   contents: write
 
 jobs:
-  build-and-upload:
+  release:
     uses: ./.github/workflows/build-and-upload.yml
+    secrets: inherit
+    permissions:
+      packages: write
+      contents: write

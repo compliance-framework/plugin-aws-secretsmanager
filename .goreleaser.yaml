@@ -2,7 +2,6 @@ version: 2
 before:
   hooks:
     - go mod download
-    - go mod verify
     - go generate ./...
 builds:
   - binary: plugin

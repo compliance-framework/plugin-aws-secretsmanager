@@ -3,46 +3,55 @@ name: build-and-upload
 on:
   workflow_call:
 
-permissions:
-  packages: write
-  contents: write
-
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@d2dde640b448ba7d3fe182efd250e433bd836392
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+          fetch-depth: 0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
         with:
           go-version-file: go.mod
-          cache: false
-      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
+      - uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552
         with:
-          version: '~> v2'
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: go install github.com/compliance-framework/gooci@v0.0.7
-      - run: gooci login ghcr.io --username "${{ github.actor }}" --password "${{ secrets.GITHUB_TOKEN }}"
-      - id: tag
+      - id: oci-tag
         shell: bash
         run: |
+          # Build the OCI tag from $GITHUB_REF_NAME, enforcing OCI tag constraints.
           raw="${GITHUB_REF_NAME}"
           clean="$(printf '%s' "$raw" | tr -c '[:alnum:]._-' '-')"
-          if [[ -z "$clean" ]]; then
-            clean="v"
-          elif [[ "$clean" == .* || "$clean" == -* ]]; then
-            clean="v${clean}"
-          fi
+          # OCI tags must not start with . or - ; prefix a safe alphanumeric if so.
+          case "$clean" in
+            ""|.*|-*) clean="v${clean}" ;;
+          esac
+          # OCI tags are max 128 chars.
           clean="${clean:0:128}"
-          echo "value=$clean" >> "$GITHUB_OUTPUT"
+          echo "value=${clean}" >> "$GITHUB_OUTPUT"
+
+          # Prerelease detection MUST use a strict semver prerelease regex, NOT a substring match
+          # on '-'. Organisation-internal tags often contain '-' without being prereleases.
+          prerelease=false
           if [[ "$raw" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            prerelease=true
           fi
-      - run: gooci upload --annotate="org.ccf.plugin.protocol.version=2" "dist/" "ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.value }}"
-      - if: ${{ steps.tag.outputs.prerelease != 'true' }}
-        run: gooci upload --annotate="org.ccf.plugin.protocol.version=2" "dist/" "ghcr.io/${{ github.repository }}:latest"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+      - run: go install github.com/compliance-framework/gooci@v0.0.7
+      - shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gooci login ghcr.io --username "${GITHUB_ACTOR}" --password "${GITHUB_TOKEN}"
+      - shell: bash
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          gooci upload --annotate="org.ccf.plugin.protocol.version=2" "dist/" "ghcr.io/${repo}:${{ steps.oci-tag.outputs.value }}"
+      - if: steps.oci-tag.outputs.prerelease != 'true'
+        shell: bash
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          gooci upload --annotate="org.ccf.plugin.protocol.version=2" "dist/" "ghcr.io/${repo}:latest"
