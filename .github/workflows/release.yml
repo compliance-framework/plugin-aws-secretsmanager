@@ -1,0 +1,14 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  packages: write
+  contents: write
+
+jobs:
+  build-and-upload:
+    uses: ./.github/workflows/build-and-upload.yml
