@@ -1,0 +1,5 @@
+lisa-addressed:
+---
+Comment (main.go:183):
+This here should be a Component, NOT an inventory item.
+Implementation guidance: In main.go buildSubjectTemplates, change the aws-secretsmanager-secret SubjectTemplate Type from proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM to proto.SubjectType_SUBJECT_TYPE_COMPONENT. Also update input.go buildResourceRecord so ResourceRecord.SubjectType is proto.SubjectType_SUBJECT_TYPE_COMPONENT, otherwise generated subjects will disagree with the registered template. Keep the resource identity as resourceTypeSecret, keep the single emitted ResourceRecord per secret ARN, and do not change resource_id/ARN handling or policy bundle routing. Review tests or add/update a focused test that asserts the secret subject/template type is Component.
