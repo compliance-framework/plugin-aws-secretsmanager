@@ -10,7 +10,7 @@ The plugin registers one subject template:
 
 | Name | Type | Identity labels |
 | --- | --- | --- |
-| `aws-secretsmanager-secret` | inventory item | `account_id`, `region`, `resource_id` |
+| `aws-secretsmanager-secret` | component | `account_id`, `region`, `resource_id` |
 
 Every evidence record also includes labels: `provider=aws`, `type=secretsmanager`, `subject=aws-secretsmanager-secret`, `account_id`, `region`, `resource_id`, `resource_arn`, `resource_type=secret`, and `account_tag_<key>` for account config tags. `resource_id` is the ARN segment after the final `:` and keeps the AWS 6-character suffix.
 

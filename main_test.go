@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	sm "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -74,6 +75,42 @@ func TestDefaultLogLevel(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "bogus")
 	if got := defaultLogLevel(); got != hclog.Info {
 		t.Fatalf("unknown LOG_LEVEL = %v", got)
+	}
+}
+
+func TestSecretSubjectTemplateAndRecordUseComponentType(t *testing.T) {
+	templates := buildSubjectTemplates()
+	if len(templates) != 1 {
+		t.Fatalf("templates = %d", len(templates))
+	}
+	if templates[0].GetName() != "aws-secretsmanager-secret" {
+		t.Fatalf("template name = %s", templates[0].GetName())
+	}
+	if templates[0].GetType() != proto.SubjectType_SUBJECT_TYPE_COMPONENT {
+		t.Fatalf("template type = %v", templates[0].GetType())
+	}
+
+	record := newSecretRecord(
+		ResolvedTarget{AccountID: "123456789012", Region: "us-east-1"},
+		"arn:aws:secretsmanager:us-east-1:123456789012:secret:App/db-AbCdEf",
+		map[string]interface{}{},
+		map[string]interface{}{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		false,
+		time.Now(),
+	)
+	if record.SubjectType != proto.SubjectType_SUBJECT_TYPE_COMPONENT {
+		t.Fatalf("record subject type = %v", record.SubjectType)
+	}
+	if record.Input.Resource.Type != resourceTypeSecret {
+		t.Fatalf("resource type = %s", record.Input.Resource.Type)
+	}
+	if record.Input.Resource.ID != "App/db-AbCdEf" {
+		t.Fatalf("resource id = %s", record.Input.Resource.ID)
 	}
 }
 

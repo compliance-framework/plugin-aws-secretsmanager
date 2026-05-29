@@ -116,7 +116,7 @@ func newSecretRecord(target ResolvedTarget, arn string, config map[string]interf
 		Input:       input,
 		Labels:      labels,
 		SubjectID:   target.AccountID + ":" + target.Region + ":" + arn,
-		SubjectType: proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
+		SubjectType: proto.SubjectType_SUBJECT_TYPE_COMPONENT,
 		Title:       "Secrets Manager secret " + id,
 		Raw:         config,
 	}

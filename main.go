@@ -180,7 +180,7 @@ func buildSubjectTemplates() []*proto.SubjectTemplate {
 	return []*proto.SubjectTemplate{
 		{
 			Name:                "aws-secretsmanager-secret",
-			Type:                proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
+			Type:                proto.SubjectType_SUBJECT_TYPE_COMPONENT,
 			TitleTemplate:       "Secrets Manager secret {{ .resource_id }} in {{ .account_id }}/{{ .region }}",
 			DescriptionTemplate: "AWS Secrets Manager secret {{ .resource_id }}.",
 			PurposeTemplate:     "Represents a Secrets Manager secret evaluated for compliance posture.",
