@@ -1,223 +1,132 @@
-# AWS ELBv2 CCF Plugin
+# AWS Secrets Manager CCF Plugin
 
-This plugin collects read-only AWS Elastic Load Balancing v2 evidence and evaluates CCF Rego policy bundles against one normalized input document per ELBv2 resource.
+This repository builds a CCF RunnerV2 plugin for AWS Secrets Manager. It collects read-only Secrets Manager metadata, resource policies, version stages, tags, and CloudTrail event history, then evaluates configured Rego policy bundles against one normalized record per secret ARN.
 
-It implements the RunnerV2 gRPC plugin protocol from `github.com/compliance-framework/agent`.
+The plugin never calls `GetSecretValue`.
 
-Component subject templates registered during `Init`:
+## Subject
 
-- `aws-elbv2-loadbalancer`
-- `aws-elbv2-listener`
-- `aws-elbv2-target-group`
-- `aws-elbv2-target-health`
+The plugin registers one subject template:
 
-Account and region are labels and input context. They are not standalone subjects.
+| Name | Type | Identity labels |
+| --- | --- | --- |
+| `aws-secretsmanager-secret` | component | `account_id`, `region`, `resource_id` |
+
+Every evidence record also includes labels: `provider=aws`, `type=secretsmanager`, `subject=aws-secretsmanager-secret`, `account_id`, `region`, `resource_id`, `resource_arn`, `resource_type=secret`, and `account_tag_<key>` for account config tags. `resource_id` is the ARN segment after the final `:` and keeps the AWS 6-character suffix.
 
 ## Configuration
 
-The CCF agent passes configuration as flat string fields. Structured values are JSON-encoded strings.
+The CCF agent passes flat string config. Structured values are JSON strings.
 
-| Key | Default | Description |
+| Key | Default | Notes |
 | --- | --- | --- |
-| `accounts` | `[]` | JSON array of `{account_id, regions[], role_arn, external_id, session_name, tags{}}`. Empty means use the configured AWS credential chain. |
-| `default_regions` | `[]` | JSON array used when an account omits `regions`; falls back to the AWS SDK default region. |
-| `lookback_days` | `90` | Positive integer no greater than `90`, used for CloudTrail LookupEvents. |
+| `accounts` | `[]` | JSON array of `{account_id, regions[], role_arn, external_id, session_name, tags{}}`. Empty uses the ambient AWS credential chain. |
+| `default_regions` | `[]` | JSON array used when an account omits `regions`; then falls back to the SDK default region. |
+| `lookback_days` | `90` | Positive integer up to `90`, used for CloudTrail event history. |
 | `policy_inputs` | `{}` | JSON object exposed to Rego as `input.policy_inputs`. |
 | `policy_input` | `{}` | Alias for `policy_inputs`. |
-| `policy_labels` | `{}` | JSON string map merged into generated evidence labels. |
-| `max_concurrency` | `4` | Positive integer no greater than `32`, used as the worker count for account/region collection. |
-| `api_timeout_seconds` | `60` | Positive integer timeout per account/region target. |
-| `tag_batch_size` | `20` | Positive integer no greater than `20`, used as the ELBv2 `DescribeTags` resource ARN batch size. |
+| `policy_labels` | `{}` | JSON string map merged into evidence labels. |
+| `max_concurrency` | `4` | Positive worker count for account/region targets; `0` is normalized to `1`. |
+| `api_timeout_seconds` | `120` | Positive per-target budget covering all paginated Secrets Manager, CloudTrail, and STS calls for one account/region. |
 
-Example:
+Runtime logs default to `info`. Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error` to override the level.
 
-```json
-{
-  "accounts": "[{\"account_id\":\"123456789012\",\"regions\":[\"us-east-1\"],\"role_arn\":\"arn:aws:iam::123456789012:role/elbv2-readonly\",\"external_id\":\"ccf\",\"session_name\":\"ccf-elbv2\",\"tags\":{\"environment\":\"prod\"}}]",
-  "default_regions": "[\"us-east-1\"]",
-  "lookback_days": "90",
-  "policy_inputs": "{\"minimum_availability_zones\":2}",
-  "policy_labels": "{\"team\":\"security\"}"
-}
-```
+## Rego Input
 
-## Rego Input Schema
-
-All records share this envelope:
-
-- `schema_version`: `v1`
-- `source`: `aws-elbv2`
-- `account`: `{account_id, role_arn, tags}`
-- `region`: `{name}`
-- `resource`: `{id, arn, type}`
-- `config`: resource-specific fields listed below
-- `dynamic`: dynamic evidence enrichment; empty for non-loadbalancer records
-- `tags`: ELBv2 tags for load balancer, listener, and target-group records; empty for target-health records
-- `collection`: collection metadata, raw payload hash, errors, and optional lookback window
-- `policy_inputs`: parsed policy input object
-
-### `loadbalancer`
+Each secret is marshaled with `resource.type = "secret"`:
 
 ```json
 {
   "schema_version": "v1",
-  "source": "aws-elbv2",
+  "source": "aws-secretsmanager",
   "account": {"account_id": "123456789012", "role_arn": "", "tags": {"environment": "prod"}},
   "region": {"name": "us-east-1"},
   "resource": {
-    "id": "app/my-alb/abc123",
-    "arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/abc123",
-    "type": "loadbalancer"
+    "id": "MyApp/db/credentials-AbCdEf",
+    "arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:MyApp/db/credentials-AbCdEf",
+    "type": "secret"
   },
   "config": {
-    "load_balancer_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/abc123",
-    "dns_name": "my-alb-123.us-east-1.elb.amazonaws.com",
-    "scheme": "internet-facing",
-    "type": "application",
-    "state": "active",
-    "availability_zones": ["us-east-1a", "us-east-1b"]
+    "secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:MyApp/db/credentials-AbCdEf",
+    "name_hash": "sha256:...",
+    "kms_key_id": "aws/secretsmanager",
+    "rotation_enabled": true,
+    "rotation_lambda_arn": "arn:aws:lambda:us-east-1:123456789012:function:rotate-db",
+    "rotation_rules": {"automatically_after_days": 30, "schedule_expression": "", "duration": ""},
+    "last_rotated_date": "2026-04-12T03:00:00Z",
+    "last_changed_date": "2026-04-12T03:00:00Z",
+    "last_accessed_date": "2026-05-26T14:22:11Z",
+    "deleted_date": "",
+    "recovery_window_days": 0,
+    "owning_service": "",
+    "replication_status": [
+      {"region": "us-west-2", "status": "InSync", "last_accessed_date": "2026-05-26T14:22:11Z", "status_message": ""}
+    ],
+    "description_hash": "sha256:...",
+    "resource_policy": {
+      "hash": "sha256:...",
+      "document": {"Version": "2012-10-17", "Statement": []},
+      "principals": [
+        {"principal": "arn:aws:iam::123456789012:role/app-reader", "action": ["secretsmanager:GetSecretValue"], "condition": null, "effect": "Allow"}
+      ]
+    },
+    "resource_policy_present": true,
+    "versions": [
+      {"version_id": "abc-123", "created_date": "2026-04-12T03:00:00Z", "kms_key_ids": ["arn:aws:kms:us-east-1:123456789012:key/..."], "stages": ["AWSCURRENT"]},
+      {"version_id": "def-456", "created_date": "2026-03-13T03:00:00Z", "kms_key_ids": ["arn:aws:kms:us-east-1:123456789012:key/..."], "stages": ["AWSPREVIOUS"]}
+    ],
+    "deprecated_version_count": 0
   },
   "dynamic": {
     "cloudtrail_events": [
-      {"event_name": "ModifyListener", "event_time": "2026-04-01T10:00:00Z", "user_identity_arn": "arn:aws:iam::123456789012:role/admin"}
-    ]
+      {"event_name": "RotateSecret", "event_time": "2026-04-12T03:00:00Z", "user_identity_arn": "arn:aws:iam::123456789012:role/rotation", "aws_region": "us-east-1", "event_id": "evt-1", "resources": ["MyApp/db/credentials-AbCdEf"]}
+    ],
+    "iam_credential_removal_events": []
   },
-  "tags": {"owner": "platform-team"},
+  "tags": {"Owner": "platform-team", "Environment": "prod", "DataClassification": "confidential"},
   "collection": {
-    "collected_at": "2026-05-14T12:00:00Z",
-    "collector_version": "aws-elbv2",
+    "collected_at": "2026-05-28T12:00:00Z",
+    "collector_version": "aws-secretsmanager",
     "collection_type": "config_dynamic",
-    "lookback_window": {"start": "2026-02-13T12:00:00Z", "end": "2026-05-14T12:00:00Z"},
-    "raw_payload_hashes": {"primary": "sha256:..."},
+    "lookback_window": {"start": "2026-02-27T12:00:00Z", "end": "2026-05-28T12:00:00Z"},
+    "raw_payload_hashes": {"describe": "sha256:...", "policy": "sha256:...", "versions": "sha256:..."},
     "errors": []
   },
-  "policy_inputs": {"minimum_availability_zones": 2}
+  "policy_inputs": {}
 }
 ```
 
-### `listener`
+When AWS omits `KmsKeyId` for the AWS-managed default key, `config.kms_key_id` is emitted as the sentinel string `aws/secretsmanager`. Date fields are always strings and are `""` when absent. When no resource policy exists, `resource_policy` is `{"hash":"","document":null,"principals":[]}` and `resource_policy_present` is `false`.
 
-```json
-{
-  "schema_version": "v1",
-  "source": "aws-elbv2",
-  "account": {"account_id": "123456789012", "role_arn": "", "tags": {"environment": "prod"}},
-  "region": {"name": "us-east-1"},
-  "resource": {
-    "id": "listener/app/my-alb/abc123/def456",
-    "arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/my-alb/abc123/def456",
-    "type": "listener"
-  },
-  "config": {
-    "listener_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/my-alb/abc123/def456",
-    "load_balancer_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/abc123",
-    "protocol": "HTTPS",
-    "port": 443,
-    "ssl_policy": "ELBSecurityPolicy-TLS13-1-2-2021-06",
-    "certificate_arn": "arn:aws:acm:us-east-1:123456789012:certificate/cert1"
-  },
-  "dynamic": {},
-  "tags": {"tls": "public"},
-  "collection": {
-    "collected_at": "2026-05-14T12:00:00Z",
-    "collector_version": "aws-elbv2",
-    "collection_type": "config",
-    "raw_payload_hashes": {"primary": "sha256:..."},
-    "errors": []
-  },
-  "policy_inputs": {"minimum_availability_zones": 2}
-}
-```
-
-### `target-group`
-
-```json
-{
-  "schema_version": "v1",
-  "source": "aws-elbv2",
-  "account": {"account_id": "123456789012", "role_arn": "", "tags": {"environment": "prod"}},
-  "region": {"name": "us-east-1"},
-  "resource": {
-    "id": "app-tg/ghi789",
-    "arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/app-tg/ghi789",
-    "type": "target-group"
-  },
-  "config": {
-    "target_group_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/app-tg/ghi789",
-    "load_balancer_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/abc123",
-    "protocol": "HTTP",
-    "port": 80,
-    "health_check_protocol": "HTTP",
-    "health_check_path": "/healthz",
-    "healthy_threshold_count": 3,
-    "unhealthy_threshold_count": 2
-  },
-  "dynamic": {},
-  "tags": {"service": "orders"},
-  "collection": {
-    "collected_at": "2026-05-14T12:00:00Z",
-    "collector_version": "aws-elbv2",
-    "collection_type": "config",
-    "raw_payload_hashes": {"primary": "sha256:..."},
-    "errors": []
-  },
-  "policy_inputs": {"minimum_availability_zones": 2}
-}
-```
-
-### `target-health`
-
-```json
-{
-  "schema_version": "v1",
-  "source": "aws-elbv2",
-  "account": {"account_id": "123456789012", "role_arn": "", "tags": {"environment": "prod"}},
-  "region": {"name": "us-east-1"},
-  "resource": {
-    "id": "app-tg/ghi789/i-1234567890abcdef0",
-    "arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/app-tg/ghi789",
-    "type": "target-health"
-  },
-  "config": {
-    "target_group_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/app-tg/ghi789",
-    "target_id": "i-1234567890abcdef0",
-    "target_health_state": "healthy"
-  },
-  "dynamic": {},
-  "tags": {},
-  "collection": {
-    "collected_at": "2026-05-14T12:00:00Z",
-    "collector_version": "aws-elbv2",
-    "collection_type": "config",
-    "raw_payload_hashes": {"primary": "sha256:..."},
-    "errors": []
-  },
-  "policy_inputs": {"minimum_availability_zones": 2}
-}
-```
+`recovery_window_days` defaults to `0` and is populated from a matched CloudTrail `DeleteSecret` event's `requestParameters.recoveryWindowInDays` when that event is available. Secrets Manager does not expose the original recovery-window setting directly on `DescribeSecret`.
 
 ## Coverage
 
-CONFIG evidence includes:
+CONFIG evidence supports rotation, vendor credential, confidentiality, and privacy policy bundles through `DescribeSecret`, `GetResourcePolicy`, `ListSecretVersionIds`, and tags from `DescribeSecret`. Fields include rotation state, rotation rules, KMS key ID string, owning service, replication status, version stages, resource policy principals, and hashed name/description.
 
-- `DescribeLoadBalancers`
-- `DescribeListeners`
-- `DescribeTargetGroups`
-- `DescribeTargetHealth`
-- `DescribeTags` for load balancer, listener, and target group tags
+DYNAMIC evidence uses a 90-day default CloudTrail lookback. Secrets Manager events are filtered to `RotateSecret`, `PutSecretValue`, `UpdateSecret`, `UpdateSecretVersionStage`, `DeleteSecret`, `RestoreSecret`, `PutResourcePolicy`, `DeleteResourcePolicy`, `TagResource`, `UntagResource`, `CreateSecret`, and `GetSecretValue`. IAM credential-removal events are filtered to `DeleteUser`, `DeleteAccessKey`, `DetachUserPolicy`, `RemoveUserFromGroup`, `DeleteRole`, `DetachRolePolicy`, and `RemoveRoleFromInstanceProfile`.
 
-DYNAMIC evidence includes CloudTrail `LookupEvents` for `elasticloadbalancing.amazonaws.com`, filtered to `CreateListener`, `ModifyListener`, `DeleteListener`, `CreateRule`, `ModifyRule`, and `DeleteRule`, and attached to matching load balancer records as `dynamic.cloudtrail_events`.
+## CloudTrail Attribution
 
-Out of scope:
+Secrets Manager events are matched to a secret by ARN, friendly name with suffix, or friendly name without suffix using substring checks against the raw CloudTrail event during collection. This is intentional because many Secrets Manager event types put the identifier in `requestParameters` rather than the structured `Resources` list.
 
-- ACM certificate expiry and renewal status. This plugin does not call `acm.DescribeCertificate`; it only records the listener `certificate_arn`.
-- SSL policy cipher inspection. This plugin records only the listener `ssl_policy` string.
-- AWS Artifact SOC reports and privacy endpoint inventory.
+IAM credential-removal events are account-wide. The plugin parses affected `userName`, `roleName`, `userArn`, and `roleArn` from `requestParameters` and attaches the event only to secrets whose resource-policy principal strings substring-match those identifiers. Unmatched IAM events are dropped.
+
+Only normalized event fields are emitted; raw CloudTrail payloads are not included in Rego input.
+
+## Error Scoping
+
+Target-level failures, such as `ListSecrets` or CloudTrail lookup failure for an account/region, are stored once under target scope. They are not copied onto every secret.
+
+Per-secret failures, such as a `GetResourcePolicy` error for one ARN, are attached only to that secret's `collection.errors`. `ResourceNotFoundException` and empty resource policies are valid no-policy states, not errors.
+
+## Out of Scope
+
+KMS key policy, key rotation, and grants are collected by `plugin-aws-kms`; this plugin records only the `kms_key_id` string from Secrets Manager. IAM principal resolution belongs to `plugin-aws-iam`; this plugin records policy principal strings and CloudTrail IAM-event ARNs only. Decrypted secret material is never read.
 
 ## Development
 
 ```sh
 make build
 make test
-goreleaser build --snapshot --clean
 ```

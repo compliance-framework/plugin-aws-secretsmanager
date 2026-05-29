@@ -1,0 +1,139 @@
+package main
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
+	sm "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/compliance-framework/agent/runner/proto"
+	"github.com/hashicorp/go-hclog"
+)
+
+type emptySM struct{}
+
+func (emptySM) ListSecrets(context.Context, *sm.ListSecretsInput, ...func(*sm.Options)) (*sm.ListSecretsOutput, error) {
+	return &sm.ListSecretsOutput{}, nil
+}
+func (emptySM) DescribeSecret(context.Context, *sm.DescribeSecretInput, ...func(*sm.Options)) (*sm.DescribeSecretOutput, error) {
+	return &sm.DescribeSecretOutput{}, nil
+}
+func (emptySM) GetResourcePolicy(context.Context, *sm.GetResourcePolicyInput, ...func(*sm.Options)) (*sm.GetResourcePolicyOutput, error) {
+	return &sm.GetResourcePolicyOutput{}, nil
+}
+func (emptySM) ListSecretVersionIds(context.Context, *sm.ListSecretVersionIdsInput, ...func(*sm.Options)) (*sm.ListSecretVersionIdsOutput, error) {
+	return &sm.ListSecretVersionIdsOutput{}, nil
+}
+
+type emptyCT struct{}
+
+func (emptyCT) LookupEvents(context.Context, *cloudtrail.LookupEventsInput, ...func(*cloudtrail.Options)) (*cloudtrail.LookupEventsOutput, error) {
+	return &cloudtrail.LookupEventsOutput{}, nil
+}
+
+func TestEvalNilRequest(t *testing.T) {
+	p := &CompliancePlugin{logger: hclog.NewNullLogger()}
+	resp, err := p.Eval(nil, nil)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if resp == nil {
+		t.Fatalf("expected non-nil response when Eval returns an error")
+	}
+	if resp.GetStatus() != proto.ExecutionStatus_FAILURE {
+		t.Fatalf("status = %v", resp.GetStatus())
+	}
+}
+
+func TestEvalNilLoggerDoesNotPanic(t *testing.T) {
+	p := &CompliancePlugin{
+		factory: fakeFactory{
+			targets: []ResolvedTarget{{AccountID: "123456789012", Region: "us-east-1"}},
+			set:     AWSClientSet{SecretsManager: emptySM{}, CloudTrail: emptyCT{}, STS: fakeSTS{}},
+		},
+	}
+	resp, err := p.Eval(&proto.EvalRequest{}, nil)
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if resp == nil || resp.GetStatus() != proto.ExecutionStatus_SUCCESS {
+		t.Fatalf("resp = %v", resp)
+	}
+}
+
+func TestDefaultLogLevel(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "")
+	if got := defaultLogLevel(); got != hclog.Info {
+		t.Fatalf("empty LOG_LEVEL = %v", got)
+	}
+	t.Setenv("LOG_LEVEL", "debug")
+	if got := defaultLogLevel(); got != hclog.Debug {
+		t.Fatalf("debug LOG_LEVEL = %v", got)
+	}
+	t.Setenv("LOG_LEVEL", "bogus")
+	if got := defaultLogLevel(); got != hclog.Info {
+		t.Fatalf("unknown LOG_LEVEL = %v", got)
+	}
+}
+
+func TestSecretSubjectTemplateAndRecordUseComponentType(t *testing.T) {
+	templates := buildSubjectTemplates()
+	if len(templates) != 1 {
+		t.Fatalf("templates = %d", len(templates))
+	}
+	if templates[0].GetName() != "aws-secretsmanager-secret" {
+		t.Fatalf("template name = %s", templates[0].GetName())
+	}
+	if templates[0].GetType() != proto.SubjectType_SUBJECT_TYPE_COMPONENT {
+		t.Fatalf("template type = %v", templates[0].GetType())
+	}
+
+	record := newSecretRecord(
+		ResolvedTarget{AccountID: "123456789012", Region: "us-east-1"},
+		"arn:aws:secretsmanager:us-east-1:123456789012:secret:App/db-AbCdEf",
+		map[string]interface{}{},
+		map[string]interface{}{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		false,
+		time.Now(),
+	)
+	if record.SubjectType != proto.SubjectType_SUBJECT_TYPE_COMPONENT {
+		t.Fatalf("record subject type = %v", record.SubjectType)
+	}
+	if record.Input.Resource.Type != resourceTypeSecret {
+		t.Fatalf("resource type = %s", record.Input.Resource.Type)
+	}
+	if record.Input.Resource.ID != "App/db-AbCdEf" {
+		t.Fatalf("resource id = %s", record.Input.Resource.ID)
+	}
+}
+
+func TestConfigureEvalConcurrent(t *testing.T) {
+	p := &CompliancePlugin{
+		logger: hclog.NewNullLogger(),
+		factory: fakeFactory{
+			targets: []ResolvedTarget{{AccountID: "123456789012", Region: "us-east-1"}},
+			set:     AWSClientSet{SecretsManager: emptySM{}, CloudTrail: emptyCT{}, STS: fakeSTS{}},
+		},
+	}
+	if _, err := p.Configure(&proto.ConfigureRequest{Config: map[string]string{"policy_inputs": `{"x":1}`}}); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if resp, err := p.Eval(&proto.EvalRequest{}, nil); err != nil || resp.GetStatus() != proto.ExecutionStatus_SUCCESS {
+				t.Errorf("eval resp=%v err=%v", resp, err)
+			}
+		}()
+	}
+	wg.Wait()
+}
