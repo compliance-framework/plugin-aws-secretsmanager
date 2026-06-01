@@ -348,9 +348,16 @@ func (c *Collector) collectSecret(ctx context.Context, client SecretsManagerAPI,
 	}
 	d.config = describeConfig(arn, describe)
 
-	policyOut, policyErr := client.GetResourcePolicy(ctx, &sm.GetResourcePolicyInput{SecretId: aws.String(arn)})
 	policyPresent := false
 	policyInfo := map[string]interface{}{"hash": "", "document": nil, "principals": []map[string]interface{}{}}
+	d.config["resource_policy"] = policyInfo
+	d.config["resource_policy_present"] = policyPresent
+	d.config["versions"] = []map[string]interface{}{}
+	d.config["deprecated_version_count"] = 0
+	if describe.DeletedDate != nil {
+		return d, nil
+	}
+	policyOut, policyErr := client.GetResourcePolicy(ctx, &sm.GetResourcePolicyInput{SecretId: aws.String(arn)})
 	if policyErr != nil {
 		var notFound *smtypes.ResourceNotFoundException
 		if !errors.As(policyErr, &notFound) {

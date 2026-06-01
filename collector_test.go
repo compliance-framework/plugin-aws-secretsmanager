@@ -301,6 +301,15 @@ func TestCollectorIncludesPlannedDeletionAndRecoveryWindow(t *testing.T) {
 	if got := rec.Input.Config["recovery_window_days"]; got != 14 {
 		t.Fatalf("recovery_window_days = %v", got)
 	}
+	if smFake.policyCalls[arn] != 0 || smFake.versionCalls[arn] != 0 {
+		t.Fatalf("deleted secret should not fetch policy or versions: policy=%d versions=%d", smFake.policyCalls[arn], smFake.versionCalls[arn])
+	}
+	if rec.Input.Config["resource_policy_present"] != false {
+		t.Fatalf("resource_policy_present = %v", rec.Input.Config["resource_policy_present"])
+	}
+	if versions, ok := rec.Input.Config["versions"].([]map[string]interface{}); !ok || len(versions) != 0 {
+		t.Fatalf("versions = %#v", rec.Input.Config["versions"])
+	}
 }
 
 func TestCollectorUsesGlobalCloudTrailForIAMEvents(t *testing.T) {
