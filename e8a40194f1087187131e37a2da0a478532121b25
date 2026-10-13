@@ -4,3 +4,6 @@ lisa-design:
 - .goreleaser.yaml only gains release.{prerelease: auto, replace_existing_artifacts: true}; hooks, builds and archive name template stay as they are so archive names/contents match the v0.1.1 assets.
 - release-please.yml concurrency has no cancel-in-progress on purpose (shared caller; a release run must not be cancelled).
 - README has no release section, so it is unchanged.
+
+lisa-selfreview:
+- Pass 1 (packs core, go, go-plugin): no findings. Workflows have top-level permissions and SHA-pinned reusable workflows; actionlint v1.7.12 clean; go build/test pass; goreleaser check and snapshot pass.
