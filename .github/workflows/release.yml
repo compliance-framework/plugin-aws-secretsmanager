@@ -1,18 +1,19 @@
+# Publishes the plugin (goreleaser archives + gooci upload) when a release is published.
 name: release
 
 on:
-  push:
-    tags:
-      - "*"
+  release:
+    types: [published]
 
 permissions:
-  packages: write
-  contents: write
+  contents: read
 
 jobs:
   release:
-    uses: ./.github/workflows/build-and-upload.yml
-    secrets: inherit
+    uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@6e7fc9c04b59c7d1117938da397f8a6f8df036ab # v1.5.2
+    with:
+      protocol-version: "2"
     permissions:
+      contents: write # goreleaser attaches the archives to the release
       packages: write
-      contents: write
+    secrets: inherit
