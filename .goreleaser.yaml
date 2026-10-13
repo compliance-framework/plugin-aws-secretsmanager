@@ -9,7 +9,7 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux, darwin]
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
