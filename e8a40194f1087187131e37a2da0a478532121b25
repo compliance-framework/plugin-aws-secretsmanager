@@ -1,0 +1,6 @@
+lisa-design:
+- Callers copied verbatim from the reviewed batch-1 pilot (plugin-file-attestation main), which are mock-plugin-1 / mock-plugin-policies-1 callers with pins at v1.5.2 (6e7fc9c) and the (W1-S1) suffix dropped. Default branch is main.
+- Manifest seeded at 0.1.1: releases/latest is v0.1.1 (final vX.Y.Z), its commit f72db7a is an ancestor of main, so no bootstrap-sha.
+- .goreleaser.yaml only gains release.{prerelease: auto, replace_existing_artifacts: true}; hooks, builds and archive name template stay as they are so archive names/contents match the v0.1.1 assets.
+- release-please.yml concurrency has no cancel-in-progress on purpose (shared caller; a release run must not be cancelled).
+- README has no release section, so it is unchanged.
