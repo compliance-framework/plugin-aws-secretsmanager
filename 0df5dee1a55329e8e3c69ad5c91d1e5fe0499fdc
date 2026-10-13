@@ -1,0 +1,4 @@
+lisa-design:
+- Plugin already stores req.GetPolicyData().AsMap() in Configure (falling back to policy_inputs) and passes it to NewPolicyProcessor, so the v0.7.0 policyData parameter needs no code change; no README/test additions (spec's "already keeps" branch).
+- go directive was already 1.26.1, so go get did not raise it; agent stays a direct requirement.
+- Transitive bumps (api v0.21.0, x/* modules, go-containerregistry, robfig/cron) are what go get + go mod tidy pulled in for agent v0.9.1; nothing pinned by hand.
