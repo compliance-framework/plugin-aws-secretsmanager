@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.51.0
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.39.12
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.9
-	github.com/compliance-framework/agent v0.9.2
+	github.com/compliance-framework/agent v0.9.3
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.7.0
 )
