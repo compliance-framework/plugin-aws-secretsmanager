@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/compliance-framework/plugin-aws-secretsmanager/compare/v0.1.2...v0.1.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **deps:** bump agent to v0.9.3, workflows to v1.7.0 ([#20](https://github.com/compliance-framework/plugin-aws-secretsmanager/issues/20)) ([b1d0fd8](https://github.com/compliance-framework/plugin-aws-secretsmanager/commit/b1d0fd84e45f8dcea1fb41f532a27005ebdb82d5))
+* **deps:** update aws-sdk-go-v2 monorepo ([#22](https://github.com/compliance-framework/plugin-aws-secretsmanager/issues/22)) ([f1718af](https://github.com/compliance-framework/plugin-aws-secretsmanager/commit/f1718af4b893138c24d4c9d6ff63eb29c729147a))
+
 ## [0.1.2](https://github.com/compliance-framework/plugin-aws-secretsmanager/compare/v0.1.1...v0.1.2) (2026-10-14)
 
 
