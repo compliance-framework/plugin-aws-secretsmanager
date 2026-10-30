@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/compliance-framework/plugin-aws-secretsmanager/compare/v0.1.3...v0.1.4) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** build with the go1.26.10 toolchain so Renovate can ship Go security fixes ([#25](https://github.com/compliance-framework/plugin-aws-secretsmanager/issues/25)) ([26d88a4](https://github.com/compliance-framework/plugin-aws-secretsmanager/commit/26d88a4d921d01bb48d0c7091d3d8df311bc75a3))
+* **deps:** update aws-sdk-go-v2 monorepo ([#28](https://github.com/compliance-framework/plugin-aws-secretsmanager/issues/28)) ([7631463](https://github.com/compliance-framework/plugin-aws-secretsmanager/commit/76314631e76b803742fad74c933728a7cca8b1a4))
+
 ## [0.1.3](https://github.com/compliance-framework/plugin-aws-secretsmanager/compare/v0.1.2...v0.1.3) (2026-10-28)
 
 
