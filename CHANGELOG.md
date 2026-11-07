@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/compliance-framework/plugin-aws-secretsmanager/compare/v0.1.4...v0.1.5) (2026-11-07)
+
+
+### Bug Fixes
+
+* **deps:** update aws-sdk-go-v2 monorepo ([#31](https://github.com/compliance-framework/plugin-aws-secretsmanager/issues/31)) ([ba93b9f](https://github.com/compliance-framework/plugin-aws-secretsmanager/commit/ba93b9fb1569ec1948f164bffffd02d03aaa8f22))
+* **deps:** update aws-sdk-go-v2 monorepo ([#33](https://github.com/compliance-framework/plugin-aws-secretsmanager/issues/33)) ([fa63163](https://github.com/compliance-framework/plugin-aws-secretsmanager/commit/fa63163f683809b4e3ed575d98e74af38818ccfe))
+
 ## [0.1.4](https://github.com/compliance-framework/plugin-aws-secretsmanager/compare/v0.1.3...v0.1.4) (2026-11-02)
 
 
